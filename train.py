@@ -2,6 +2,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -152,6 +153,89 @@ def validate(model, test_loader, device, epoch):
     print(f"Validation Accuracy: {val_accuracy:.2f}%")
     
     return val_accuracy
+
+def train_with_different_lr(model_type="cnn", learning_rates=[0.01, 0.001, 0.0001]):
+    """Train the model with different learning rates to compare performance."""
+    results = []
+    for lr in learning_rates:
+        print(f"\nTraining with learning rate: {lr}")
+        # Set device
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        
+        # Get data loaders
+        train_loader, test_loader = get_data_loaders(DATA_DIR, BATCH_SIZE, NUM_WORKERS)
+        
+        # Create model
+        model = FashionCNN(NUM_CLASSES)
+        model = model.to(device)
+        
+        # Define loss function and optimizer
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(model.parameters(), lr=lr)
+        
+        # Train for a fixed number of epochs
+        test_epochs = 5  # Use a smaller number for quick comparison
+        train_losses = []
+        val_accuracies = []
+        
+        for epoch in range(test_epochs):
+            # Training
+            model.train()
+            running_loss = 0.0
+            for images, labels in train_loader:
+                images = images.to(device)
+                labels = labels.to(device)
+                optimizer.zero_grad()
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
+                running_loss += loss.item()
+            
+            epoch_loss = running_loss / len(train_loader)
+            train_losses.append(epoch_loss)
+            
+            # Validation
+            val_accuracy = validate(model, test_loader, device, epoch)
+            val_accuracies.append(val_accuracy)
+        
+        # Store results
+        results.append({
+            'learning_rate': lr,
+            'final_accuracy': val_accuracies[-1],
+            'train_losses': train_losses,
+            'val_accuracies': val_accuracies
+        })
+    
+    # Plot comparison
+    plt.figure(figsize=(15, 10))
+    
+    # Plot training loss
+    plt.subplot(2, 1, 1)
+    for res in results:
+        plt.plot(range(1, test_epochs+1), res['train_losses'], 
+                 label=f"LR: {res['learning_rate']}")
+    plt.title('Training Loss by Learning Rate')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    
+    # Plot validation accuracy
+    plt.subplot(2, 1, 2)
+    for res in results:
+        plt.plot(range(1, test_epochs+1), res['val_accuracies'], 
+                 label=f"LR: {res['learning_rate']}")
+    plt.title('Validation Accuracy by Learning Rate')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy (%)')
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.show()
+    
+    return results
+
+
 
 if __name__ == "__main__":
     train()

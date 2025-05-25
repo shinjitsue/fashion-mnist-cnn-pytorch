@@ -175,3 +175,6 @@ def plot_confusion_matrix(model, test_loader, device):
     plt.title('Confusion Matrix')
     plt.tight_layout()
     plt.show()
+    
+    
+        

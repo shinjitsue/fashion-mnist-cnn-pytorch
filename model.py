@@ -11,29 +11,32 @@ class FashionCNN(nn.Module):
     - 2 Fully connected layers with dropout
     """
     
-    def __init__(self, num_classes=10, use_dropout=True):
+    def __init__(self, num_classes=10, use_dropout=True, channels=[32, 64, 128]):
         super(FashionCNN, self).__init__()
         
         self.use_dropout = use_dropout
         dropout_rate = 0.25 if use_dropout else 0.0
         
         # First convolutional block
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm2d(32)
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=channels[0], kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(channels[0])
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
         
         # Second convolutional block
-        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(64)
+        self.conv2 = nn.Conv2d(in_channels=channels[0], out_channels=channels[1], kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(channels[1])
         self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
         
-        # Third convolutional block (new)
-        self.conv3 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm2d(128)
-        # No pooling needed here to maintain feature map size
+        # Third convolutional block
+        self.conv3 = nn.Conv2d(in_channels=channels[1], out_channels=channels[2], kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(channels[2])
+        
+        # Calculate the size of features after convolutions and pooling
+        # 28x28 -> 14x14 -> 7x7 with our architecture
+        feature_size = 7 * 7 * channels[2]
         
         # Fully connected layers
-        self.fc1 = nn.Linear(in_features=128*7*7, out_features=256)
+        self.fc1 = nn.Linear(in_features=feature_size, out_features=256)
         self.fc2 = nn.Linear(in_features=256, out_features=num_classes)
         
         # Dropout layer

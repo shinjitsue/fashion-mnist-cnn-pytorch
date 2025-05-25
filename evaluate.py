@@ -7,7 +7,9 @@ import torch.nn.functional as F
 import seaborn as sns
 import random
 
+
 from PIL import Image
+from tqdm import tqdm
 from sklearn.metrics import precision_recall_fscore_support, roc_curve, auc, confusion_matrix
 from itertools import cycle
 from model import FashionCNN, BaselineModel, AlternativeCNN
@@ -18,15 +20,19 @@ from config import (
 )
 
 def load_model(model_file, model_class, device):
-    """Load a specific model from file"""
+    """Load a specific model from file with error handling"""
     model_path = os.path.join(SAVE_DIR, model_file)
     model = model_class(NUM_CLASSES)
     
-    # Check if model file exists
-    if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path, map_location=device))
-    else:
-        print(f"Warning: Model file {model_path} not found. Using untrained model.")
+    try:
+        # Check if model file exists
+        if os.path.exists(model_path):
+            model.load_state_dict(torch.load(model_path, map_location=device))
+            print(f"Successfully loaded model from {model_path}")
+        else:
+            print(f"Warning: Model file {model_path} not found. Using untrained model.")
+    except Exception as e:
+        print(f"Error loading model: {str(e)}. Using untrained model.")
     
     return model.to(device)
 
@@ -79,51 +85,112 @@ def plot_roc_curves(y_true, y_score):
     plt.tight_layout()
     plt.show()
 
-def visualize_errors(model, test_loader, device, num_samples=10):
-    """Visualize misclassified examples"""
+
+def visualize_model_predictions(model, test_loader, device, num_images=10, errors_only=False):
+    """
+    Visualize model predictions, optionally focusing on errors only.
+    
+    Args:
+        model: Trained PyTorch model
+        test_loader: Data loader for the test dataset
+        device: Device to run the model on
+        num_images: Number of images to visualize
+        errors_only: If True, show only misclassified examples
+    """
     model.eval()
-    errors_images = []
-    errors_preds = []
-    errors_labels = []
     
-    with torch.no_grad():
-        for images, labels in test_loader:
-            images = images.to(device)
-            labels = labels.to(device)
-            
-            outputs = model(images)
-            _, preds = torch.max(outputs, 1)
-            
-            # Find misclassifications
-            error_mask = preds != labels
-            misclassified_images = images[error_mask]
-            misclassified_preds = preds[error_mask]
-            misclassified_labels = labels[error_mask]
-            
-            # Add errors to our lists
-            errors_images.extend(misclassified_images.cpu().numpy())
-            errors_preds.extend(misclassified_preds.cpu().numpy())
-            errors_labels.extend(misclassified_labels.cpu().numpy())
-            
-            if len(errors_images) >= num_samples:
-                break
+    if errors_only:
+        # Collect misclassified examples
+        errors_images = []
+        errors_preds = []
+        errors_labels = []
+        
+        with torch.no_grad():
+            for images, labels in test_loader:
+                images = images.to(device)
+                labels = labels.to(device)
+                
+                outputs = model(images)
+                _, preds = torch.max(outputs, 1)
+                
+                # Find misclassifications
+                error_mask = preds != labels
+                misclassified_images = images[error_mask]
+                misclassified_preds = preds[error_mask]
+                misclassified_labels = labels[error_mask]
+                
+                # Add errors to our lists
+                errors_images.extend(misclassified_images.cpu().numpy())
+                errors_preds.extend(misclassified_preds.cpu().numpy())
+                errors_labels.extend(misclassified_labels.cpu().numpy())
+                
+                if len(errors_images) >= num_images:
+                    break
+        
+        # Take only the requested number of samples
+        sample_images = errors_images[:num_images]
+        predicted_labels = errors_preds[:num_images]
+        sample_labels = errors_labels[:num_images]
+        
+        title_prefix = "Challenging Cases: Misclassified Examples"
+    else:
+        # Get a batch of random test images
+        data_iter = iter(test_loader)
+        images, labels = next(data_iter)
+        
+        # Select random images
+        indices = random.sample(range(len(images)), num_images)
+        sample_images_tensor = images[indices].to(device)
+        sample_labels = labels[indices].tolist()
+        
+        # Get predictions
+        with torch.no_grad():
+            outputs = model(sample_images_tensor)
+            _, predicted = torch.max(outputs, 1)
+        
+        predicted_labels = predicted.cpu().tolist()
+        sample_images = [img.cpu().numpy() for img in sample_images_tensor]
+        
+        title_prefix = "Model Predictions"
     
-    # Take only the first num_samples
-    errors_images = errors_images[:num_samples]
-    errors_preds = errors_preds[:num_samples]
-    errors_labels = errors_labels[:num_samples]
+    # Display images with true and predicted labels
+    rows = (num_images + 4) // 5  # Calculate rows needed (ceiling division)
+    cols = min(5, num_images)     # Use at most 5 columns
     
-    # Plot misclassified examples
-    plt.figure(figsize=(12, 8))
-    for i in range(min(num_samples, len(errors_images))):
-        plt.subplot(2, 5, i+1)
-        plt.imshow(errors_images[i][0], cmap='gray')
-        plt.title(f"True: {CLASS_LABELS[errors_labels[i]]}\nPred: {CLASS_LABELS[errors_preds[i]]}")
-        plt.axis('off')
+    fig, axes = plt.subplots(rows, cols, figsize=(3*cols, 3*rows))
+    if rows * cols == 1:  # Handle the case of a single image
+        axes = np.array([axes])
+    axes = axes.flatten()
     
-    plt.suptitle("Challenging Cases: Misclassified Examples")
+    for i in range(min(num_images, len(sample_images))):
+        if isinstance(sample_images[i], np.ndarray):
+            img = sample_images[i][0]  # Get the grayscale channel
+        else:
+            img = sample_images[i]
+            
+        axes[i].imshow(img, cmap='gray')
+        
+        # Set title with true and predicted labels
+        if errors_only:
+            title = f"True: {CLASS_LABELS[sample_labels[i]]}\n"
+            title += f"Pred: {CLASS_LABELS[predicted_labels[i]]}"
+            color = 'red'  # Errors are always in red
+        else:
+            title = f"True: {CLASS_LABELS[sample_labels[i]]}\n"
+            title += f"Pred: {CLASS_LABELS[predicted_labels[i]]}"
+            color = 'green' if sample_labels[i] == predicted_labels[i] else 'red'
+        
+        axes[i].set_title(title, color=color)
+        axes[i].axis('off')
+    
+    # Hide any unused subplots
+    for i in range(len(sample_images), len(axes)):
+        axes[i].axis('off')
+    
+    plt.suptitle(title_prefix)
     plt.tight_layout()
     plt.show()
+
 
 def plot_model_comparisons(model_metrics):
     """Plot comparison of different models"""
@@ -202,10 +269,21 @@ def evaluate():
         print("Continuing with main model evaluation only.")
     
     # Visualize some predictions from the main model
-    visualize_predictions(main_model, test_loader, device)
+    visualize_model_predictions(main_model, test_loader, device, errors_only=False)
 
-def evaluate_model(model, test_loader, device):
-    """Comprehensive evaluation of a model"""
+def evaluate_model(model, test_loader, device, plot_visuals=True):
+    """
+    Streamlined model evaluation focused on essential metrics.
+    
+    Args:
+        model: Trained PyTorch model
+        test_loader: Data loader for the test dataset
+        device: Device to run the model on
+        plot_visuals: Whether to generate visualizations
+    
+    Returns:
+        dict: Dictionary of evaluation metrics
+    """
     model.eval()
     
     all_targets = []
@@ -213,7 +291,7 @@ def evaluate_model(model, test_loader, device):
     all_probabilities = []
     
     with torch.no_grad():
-        for images, labels in test_loader:
+        for images, labels in tqdm(test_loader, desc="Evaluating model"):
             images = images.to(device)
             labels = labels.to(device)
             
@@ -235,16 +313,21 @@ def evaluate_model(model, test_loader, device):
     print(f'Test Accuracy: {accuracy:.2f}%')
     
     # Calculate per-class metrics
-    precision, recall, f1, support = calculate_per_class_metrics(all_targets, all_predictions)
+    precision, recall, f1, support = precision_recall_fscore_support(
+        all_targets, all_predictions, average=None
+    )
     
-    # Plot confusion matrix
-    plot_confusion_matrix(model, test_loader, device)
-    
-    # Plot ROC curves
-    plot_roc_curves(all_targets, all_probabilities)
-    
-    # Visualize misclassified examples (error analysis)
-    visualize_errors(model, test_loader, device)
+    # Print per-class metrics
+    if plot_visuals:
+        print("\nPer-Class Metrics:")
+        print("Class\t\tPrecision\tRecall\t\tF1-Score\tSupport")
+        for i in range(NUM_CLASSES):
+            print(f"{CLASS_LABELS[i]}\t{precision[i]:.4f}\t\t{recall[i]:.4f}\t\t{f1[i]:.4f}\t\t{support[i]}")
+        
+        # Generate visualizations if requested
+        plot_confusion_matrix(model, test_loader, device)
+        plot_roc_curves(all_targets, all_probabilities)
+        visualize_model_predictions(model, test_loader, device, errors_only=True)
     
     # Return metrics for comparison
     return {
@@ -253,51 +336,7 @@ def evaluate_model(model, test_loader, device):
         'recall': recall,
         'f1': f1,
     }
-def visualize_predictions(model, test_loader, device, num_images=10):
-    """
-    Visualize model predictions on random test images.
     
-    Args:
-        model: Trained PyTorch model
-        test_loader: Data loader for the test dataset
-        device: Device to run the model on
-        num_images: Number of random images to visualize
-    """
-    # Get a batch of test images
-    data_iter = iter(test_loader)
-    images, labels = next(data_iter)
-    
-    # Select random images
-    indices = random.sample(range(len(images)), num_images)
-    sample_images = images[indices].to(device)
-    sample_labels = labels[indices].tolist()
-    
-    # Get predictions
-    with torch.no_grad():
-        outputs = model(sample_images)
-        _, predicted = torch.max(outputs, 1)
-    
-    predicted_labels = predicted.cpu().tolist()
-    
-    # Display images with true and predicted labels
-    fig, axes = plt.subplots(2, 5, figsize=(15, 6))
-    axes = axes.flatten()
-    
-    for i in range(num_images):
-        img = sample_images[i].cpu().numpy()[0]  # Get the grayscale channel
-        axes[i].imshow(img, cmap='gray')
-        
-        # Set title with true and predicted labels
-        title = f"True: {CLASS_LABELS[sample_labels[i]]}\n"
-        title += f"Pred: {CLASS_LABELS[predicted_labels[i]]}"
-        
-        # Highlight correct/incorrect predictions
-        color = 'green' if sample_labels[i] == predicted_labels[i] else 'red'
-        axes[i].set_title(title, color=color)
-        axes[i].axis('off')
-    
-    plt.tight_layout()
-    plt.show()
 
 if __name__ == "__main__":
     evaluate()
