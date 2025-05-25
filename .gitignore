@@ -173,7 +173,3 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-
-
-
-requirements.txt
