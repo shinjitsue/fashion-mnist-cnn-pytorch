@@ -6,6 +6,8 @@ A comprehensive deep learning project implementing and comparing multiple Convol
 
 This project demonstrates a complete machine learning pipeline including data preprocessing, model design, training, evaluation, and analysis. It implements multiple CNN architectures with systematic ablation studies to understand the impact of various design choices.
 
+![Figure_17](https://github.com/user-attachments/assets/bb9dd932-2813-4bd2-b9d6-27db95bb205d)
+
 ## 📊 Performance Results
 
 ### Model Comparison Summary
@@ -67,6 +69,8 @@ class FashionCNN(nn.Module):
 - **Comparison purpose**: Validates the benefit of deeper architectures
 
 ## 📈 Training Configuration
+
+![Figure_6](https://github.com/user-attachments/assets/805aa575-3c29-42d6-ae2f-29fa4dbfe355)
 
 ### Hyperparameter Choices
 
