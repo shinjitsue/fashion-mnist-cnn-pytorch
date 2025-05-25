@@ -1,7 +1,3 @@
-"""
-CNN model architecture for Fashion MNIST classification.
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,47 +7,55 @@ class FashionCNN(nn.Module):
     Convolutional Neural Network for Fashion MNIST classification.
     
     Architecture:
-    - 2 Convolutional layers with ReLU activation and max pooling
-    - 2 Fully connected layers
+    - 3 Convolutional layers with batch normalization, ReLU activation and max pooling
+    - 2 Fully connected layers with dropout
     """
     
-    def __init__(self, num_classes=10):
+    def __init__(self, num_classes=10, use_dropout=True):
         super(FashionCNN, self).__init__()
         
-        # First convolutional layer
-        # Input: 1 channel (grayscale), Output: 32 feature maps, 3x3 kernel
+        self.use_dropout = use_dropout
+        dropout_rate = 0.25 if use_dropout else 0.0
+        
+        # First convolutional block
         self.conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, padding=1)
-        # Max pooling layer with 2x2 window
+        self.bn1 = nn.BatchNorm2d(32)
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
         
-        # Second convolutional layer
-        # Input: 32 channels, Output: 64 feature maps, 3x3 kernel
+        # Second convolutional block
         self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
-        # Max pooling layer with 2x2 window
+        self.bn2 = nn.BatchNorm2d(64)
         self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
         
-        # Fully connected layers
-        # After two 2x2 pooling layers, the 28x28 image becomes 7x7
-        # Number of features = 64 feature maps * 7 * 7
-        self.fc1 = nn.Linear(in_features=64*7*7, out_features=128)
-        self.fc2 = nn.Linear(in_features=128, out_features=num_classes)
+        # Third convolutional block (new)
+        self.conv3 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+        # No pooling needed here to maintain feature map size
         
-        # Dropout layer to prevent overfitting
-        self.dropout = nn.Dropout(0.25)
+        # Fully connected layers
+        self.fc1 = nn.Linear(in_features=128*7*7, out_features=256)
+        self.fc2 = nn.Linear(in_features=256, out_features=num_classes)
+        
+        # Dropout layer
+        self.dropout = nn.Dropout(dropout_rate)
         
     def forward(self, x):
-        # First conv block: conv -> relu -> pooling
-        x = self.pool1(F.relu(self.conv1(x)))
+        # First conv block: conv -> batch norm -> relu -> pooling
+        x = self.pool1(F.relu(self.bn1(self.conv1(x))))
         
-        # Second conv block: conv -> relu -> pooling
-        x = self.pool2(F.relu(self.conv2(x)))
+        # Second conv block: conv -> batch norm -> relu -> pooling
+        x = self.pool2(F.relu(self.bn2(self.conv2(x))))
         
-        # Flatten the output for the fully connected layer
-        # -1 in the reshape corresponds to the batch size
-        x = x.view(-1, 64*7*7)
+        # Third conv block: conv -> batch norm -> relu
+        x = F.relu(self.bn3(self.conv3(x)))
+        
+        # Flatten
+        x = x.view(-1, 128*7*7)
         
         # First fully connected layer with dropout
-        x = self.dropout(F.relu(self.fc1(x)))
+        x = F.relu(self.fc1(x))
+        if self.use_dropout:
+            x = self.dropout(x)
         
         # Output layer
         x = self.fc2(x)
