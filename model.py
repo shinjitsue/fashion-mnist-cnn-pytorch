@@ -79,16 +79,40 @@ class BaselineModel(nn.Module):
 
 class AlternativeCNN(nn.Module):
     """Alternative shallow CNN architecture for comparison"""
-    def __init__(self, num_classes=10):
+    def __init__(self, num_classes=10, use_dropout=True):
         super(AlternativeCNN, self).__init__()
-        self.conv1 = nn.Conv2d(1, 16, kernel_size=5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.fc1 = nn.Linear(16 * 12 * 12, 128)
+        
+        self.use_dropout = use_dropout
+        dropout_rate = 0.25 if use_dropout else 0.0
+        
+        # Simpler architecture with fewer layers
+        self.conv1 = nn.Conv2d(1, 16, kernel_size=5, padding=2)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.pool1 = nn.MaxPool2d(2, 2)
+        
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=5, padding=2)
+        self.bn2 = nn.BatchNorm2d(32)
+        self.pool2 = nn.MaxPool2d(2, 2)
+        
+        # Calculate flattened size: 28x28 -> 14x14 -> 7x7
+        self.fc1 = nn.Linear(32 * 7 * 7, 128)
         self.fc2 = nn.Linear(128, num_classes)
+        self.dropout = nn.Dropout(dropout_rate)
         
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = x.view(-1, 16 * 12 * 12)
+        # First conv block
+        x = self.pool1(F.relu(self.bn1(self.conv1(x))))
+        
+        # Second conv block
+        x = self.pool2(F.relu(self.bn2(self.conv2(x))))
+        
+        # Flatten and fully connected layers
+        x = x.view(-1, 32 * 7 * 7)
         x = F.relu(self.fc1(x))
+        
+        if self.use_dropout:
+            x = self.dropout(x)
+            
         x = self.fc2(x)
+        
         return x

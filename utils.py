@@ -30,18 +30,17 @@ def get_data_loaders(data_dir, batch_size, num_workers=0, apply_augmentation=Tru
     # Define transformations for training data (with augmentation)
     if apply_augmentation:
         train_transform = transforms.Compose([
-            # 1. Random rotation (±10 degrees)
             transforms.RandomRotation(10),
-            # 2. Random horizontal flip
-            transforms.RandomHorizontalFlip(),
-            # 3. Random crop with padding
+            transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomCrop(28, padding=4),
             transforms.ToTensor(),
             transforms.Normalize((0.5,), (0.5,))
         ])
     else:
-        # No augmentation for ablation study
-        train_transform = test_transform
+        train_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
     
     # Create directories if they don't exist
     os.makedirs(data_dir, exist_ok=True)
@@ -92,10 +91,10 @@ def plot_sample_images(data_loader):
     
     # Plot images in a grid
     plt.figure(figsize=(10, 10))
-    for i in range(25):  # Display 25 images in a 5x5 grid
-        plt.subplot(5, 5, i+1)
-        plt.imshow(images[i][0], cmap='gray')
-        plt.title(CLASS_LABELS[labels[i]])
+    for i in range(25):
+        plt.subplot(5, 5, i + 1)
+        plt.imshow(images[i].squeeze(), cmap='gray')
+        plt.title(f'{CLASS_LABELS[labels[i]]}')
         plt.axis('off')
     plt.tight_layout()
     plt.show()
@@ -120,61 +119,55 @@ def plot_training_history(train_losses, val_accuracies):
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
+    plt.grid(True)
     
     # Plot validation accuracy
     plt.subplot(1, 2, 2)
     plt.plot(epochs, val_accuracies, 'r-', label='Validation Accuracy')
     plt.title('Validation Accuracy')
     plt.xlabel('Epochs')
-    plt.ylabel('Accuracy')
+    plt.ylabel('Accuracy (%)')
     plt.legend()
+    plt.grid(True)
     
     plt.tight_layout()
     plt.show()
 
 def plot_confusion_matrix(model, test_loader, device):
     """
-    Plot confusion matrix for the trained model.
+    Plot confusion matrix for the model predictions.
     
     Args:
         model: Trained PyTorch model
         test_loader: Data loader for the test dataset
         device: Device to run the model on
     """
-    # Set the model to evaluation mode
     model.eval()
+    all_preds = []
+    all_labels = []
     
-    # Lists to store true labels and predictions
-    y_true = []
-    y_pred = []
-    
-    # Disable gradient calculation for inference
     with torch.no_grad():
         for images, labels in test_loader:
-            images = images.to(device)
-            labels = labels.to(device)
-            
-            # Forward pass
+            images, labels = images.to(device), labels.to(device)
             outputs = model(images)
-            _, predicted = torch.max(outputs.data, 1)
-            
-            # Append batch prediction results
-            y_true.extend(labels.cpu().numpy())
-            y_pred.extend(predicted.cpu().numpy())
+            _, predicted = torch.max(outputs, 1)
+            all_preds.extend(predicted.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
     
-    # Compute confusion matrix
-    cm = confusion_matrix(y_true, y_pred)
+    # Create confusion matrix
+    cm = confusion_matrix(all_labels, all_preds)
     
     # Plot confusion matrix
     plt.figure(figsize=(10, 8))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=CLASS_LABELS, 
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=CLASS_LABELS,
                 yticklabels=CLASS_LABELS)
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
     plt.title('Confusion Matrix')
+    plt.xlabel('Predicted Label')
+    plt.ylabel('True Label')
+    plt.xticks(rotation=45)
+    plt.yticks(rotation=0)
     plt.tight_layout()
     plt.show()
     
-    
-        
+    return cm
