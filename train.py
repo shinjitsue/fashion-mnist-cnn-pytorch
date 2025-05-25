@@ -2,16 +2,17 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 
 from model import FashionCNN, BaselineModel, AlternativeCNN
 from utils import get_data_loaders, plot_training_history
 from config import (
     DATA_DIR, BATCH_SIZE, NUM_WORKERS,
     NUM_CLASSES, LEARNING_RATE, NUM_EPOCHS,
-    SAVE_DIR, MODEL_NAME
+    SAVE_DIR, MAIN_MODEL_NAME, BASELINE_MODEL_NAME, 
+    ALTERNATIVE_MODEL_NAME, NO_AUG_MODEL_NAME, NO_DROPOUT_MODEL_NAME
 )
 
 def train(model_type="cnn", use_augmentation=True, use_dropout=True):
@@ -31,8 +32,8 @@ def train(model_type="cnn", use_augmentation=True, use_dropout=True):
         model = FashionCNN(NUM_CLASSES, use_dropout=use_dropout)
     elif model_type == "baseline":
         model = BaselineModel(NUM_CLASSES)
-    else:
-        model = AlternativeCNN(NUM_CLASSES)
+    else:  # alternative
+        model = AlternativeCNN(NUM_CLASSES, use_dropout=use_dropout)
         
     model = model.to(device)
     
@@ -59,63 +60,74 @@ def train(model_type="cnn", use_augmentation=True, use_dropout=True):
     
     # Training loop
     for epoch in range(NUM_EPOCHS):
-        model.train()  # Set model to training mode
+        # Training phase
+        model.train()
         running_loss = 0.0
         
-        # Initialize progress bar
+        # Initialize progress bar for training
         train_pbar = tqdm(enumerate(train_loader), total=len(train_loader), 
-                          desc=f"Epoch {epoch+1}/{NUM_EPOCHS} [Training]")
+                         desc=f"Epoch {epoch+1}/{NUM_EPOCHS} [Training]")
         
-        # Training
-        for i, (images, labels) in train_pbar:
-            # Move tensors to the configured device
-            images = images.to(device)
-            labels = labels.to(device)
+        for batch_idx, (data, target) in train_pbar:
+            data, target = data.to(device), target.to(device)
             
-            # Zero the parameter gradients
             optimizer.zero_grad()
-            
-            # Forward pass
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-            
-            # Backward pass and optimize
+            output = model(data)
+            loss = criterion(output, target)
             loss.backward()
             optimizer.step()
             
-            # Print statistics
             running_loss += loss.item()
-            train_pbar.set_postfix({'loss': running_loss / (i + 1)})
+            
+            # Update progress bar
+            train_pbar.set_postfix({
+                'Loss': f'{loss.item():.4f}',
+                'Avg Loss': f'{running_loss/(batch_idx+1):.4f}'
+            })
         
-        # Calculate average training loss for this epoch
-        epoch_loss = running_loss / len(train_loader)
-        train_losses.append(epoch_loss)
+        # Calculate average training loss
+        avg_train_loss = running_loss / len(train_loader)
+        train_losses.append(avg_train_loss)
         
-        # Validation
+        # Validation phase
         val_accuracy = validate(model, test_loader, device, epoch)
         val_accuracies.append(val_accuracy)
         
-        # Learning rate scheduling based on validation accuracy
+        # Learning rate scheduling
         scheduler.step(val_accuracy)
         
-        # Early stopping
+        # Early stopping and model saving
         if val_accuracy > best_val_accuracy:
             best_val_accuracy = val_accuracy
             early_stopping_counter = 0
-            # Save the best model
-            torch.save(model.state_dict(), os.path.join(SAVE_DIR, f"best_{MODEL_NAME}"))
+            # Save best model
+            torch.save(model.state_dict(), os.path.join(SAVE_DIR, "best_model.pth"))
         else:
             early_stopping_counter += 1
-            
+        
+        print(f"Epoch {epoch+1}: Train Loss: {avg_train_loss:.4f}, Val Acc: {val_accuracy:.2f}%")
+        
+        # Early stopping
         if early_stopping_counter >= early_stopping_patience:
             print(f"Early stopping triggered after {epoch+1} epochs")
             break
     
     # Load the best model
-    model.load_state_dict(torch.load(os.path.join(SAVE_DIR, f"best_{MODEL_NAME}")))
+    model.load_state_dict(torch.load(os.path.join(SAVE_DIR, "best_model.pth")))
     
     # Save the final model
-    model_filename = f"{model_type}{'_aug' if use_augmentation else ''}{'_dropout' if use_dropout else ''}_{MODEL_NAME}"
+    if model_type == "cnn":
+        if use_augmentation and use_dropout:
+            model_filename = MAIN_MODEL_NAME
+        elif not use_augmentation:
+            model_filename = NO_AUG_MODEL_NAME
+        else:  # no dropout
+            model_filename = NO_DROPOUT_MODEL_NAME
+    elif model_type == "baseline":
+        model_filename = BASELINE_MODEL_NAME
+    else:  # alternative
+        model_filename = ALTERNATIVE_MODEL_NAME
+        
     torch.save(model.state_dict(), os.path.join(SAVE_DIR, model_filename))
     print(f"Model saved to {os.path.join(SAVE_DIR, model_filename)}")
     
@@ -135,107 +147,116 @@ def validate(model, test_loader, device, epoch):
                     desc=f"Epoch {epoch+1} [Validation]")
     
     with torch.no_grad():
-        for i, (images, labels) in val_pbar:
-            images = images.to(device)
-            labels = labels.to(device)
+        for batch_idx, (data, target) in val_pbar:
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            _, predicted = torch.max(output.data, 1)
+            total += target.size(0)
+            correct += (predicted == target).sum().item()
             
-            # Forward pass
-            outputs = model(images)
-            _, predicted = torch.max(outputs.data, 1)
-            
-            # Update statistics
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-            val_pbar.set_postfix({'accuracy': 100 * correct / total})
+            # Update progress bar
+            current_acc = 100 * correct / total
+            val_pbar.set_postfix({'Accuracy': f'{current_acc:.2f}%'})
     
-    # Calculate and print validation accuracy
-    val_accuracy = 100 * correct / total
-    print(f"Validation Accuracy: {val_accuracy:.2f}%")
-    
-    return val_accuracy
+    accuracy = 100 * correct / total
+    return accuracy
 
 def train_with_different_lr(model_type="cnn", learning_rates=[0.01, 0.001, 0.0001]):
-    """Train the model with different learning rates to compare performance."""
-    results = []
+    """Train models with different learning rates for comparison."""
+    print("Training with different learning rates...")
+    
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    train_loader, test_loader = get_data_loaders(DATA_DIR, BATCH_SIZE, NUM_WORKERS)
+    
+    results = {}
+    
     for lr in learning_rates:
         print(f"\nTraining with learning rate: {lr}")
-        # Set device
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        
-        # Get data loaders
-        train_loader, test_loader = get_data_loaders(DATA_DIR, BATCH_SIZE, NUM_WORKERS)
         
         # Create model
-        model = FashionCNN(NUM_CLASSES)
+        if model_type == "cnn":
+            model = FashionCNN(NUM_CLASSES)
+        elif model_type == "baseline":
+            model = BaselineModel(NUM_CLASSES)
+        else:
+            model = AlternativeCNN(NUM_CLASSES)
+            
         model = model.to(device)
         
-        # Define loss function and optimizer
+        # Define loss function and optimizer with specific learning rate
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=lr)
         
-        # Train for a fixed number of epochs
-        test_epochs = 5  # Use a smaller number for quick comparison
         train_losses = []
         val_accuracies = []
         
-        for epoch in range(test_epochs):
+        # Shorter training for LR study
+        epochs = 5
+        
+        for epoch in range(epochs):
             # Training
             model.train()
             running_loss = 0.0
-            for images, labels in train_loader:
-                images = images.to(device)
-                labels = labels.to(device)
+            
+            for data, target in train_loader:
+                data, target = data.to(device), target.to(device)
                 optimizer.zero_grad()
-                outputs = model(images)
-                loss = criterion(outputs, labels)
+                output = model(data)
+                loss = criterion(output, target)
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
             
-            epoch_loss = running_loss / len(train_loader)
-            train_losses.append(epoch_loss)
+            avg_train_loss = running_loss / len(train_loader)
+            train_losses.append(avg_train_loss)
             
             # Validation
             val_accuracy = validate(model, test_loader, device, epoch)
             val_accuracies.append(val_accuracy)
         
-        # Store results
-        results.append({
-            'learning_rate': lr,
-            'final_accuracy': val_accuracies[-1],
+        results[lr] = {
             'train_losses': train_losses,
-            'val_accuracies': val_accuracies
-        })
+            'val_accuracies': val_accuracies,
+            'final_accuracy': val_accuracies[-1]
+        }
     
-    # Plot comparison
-    plt.figure(figsize=(15, 10))
+    # Plot learning rate comparison
+    plt.figure(figsize=(15, 5))
     
-    # Plot training loss
-    plt.subplot(2, 1, 1)
-    for res in results:
-        plt.plot(range(1, test_epochs+1), res['train_losses'], 
-                 label=f"LR: {res['learning_rate']}")
-    plt.title('Training Loss by Learning Rate')
+    # Plot training losses
+    plt.subplot(1, 3, 1)
+    for lr in learning_rates:
+        plt.plot(results[lr]['train_losses'], label=f'LR={lr}')
+    plt.title('Training Loss Comparison')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
+    plt.grid(True)
     
-    # Plot validation accuracy
-    plt.subplot(2, 1, 2)
-    for res in results:
-        plt.plot(range(1, test_epochs+1), res['val_accuracies'], 
-                 label=f"LR: {res['learning_rate']}")
-    plt.title('Validation Accuracy by Learning Rate')
+    # Plot validation accuracies
+    plt.subplot(1, 3, 2)
+    for lr in learning_rates:
+        plt.plot(results[lr]['val_accuracies'], label=f'LR={lr}')
+    plt.title('Validation Accuracy Comparison')
     plt.xlabel('Epochs')
     plt.ylabel('Accuracy (%)')
     plt.legend()
+    plt.grid(True)
+    
+    # Plot final accuracies
+    plt.subplot(1, 3, 3)
+    final_accs = [results[lr]['final_accuracy'] for lr in learning_rates]
+    plt.bar([str(lr) for lr in learning_rates], final_accs)
+    plt.title('Final Validation Accuracy')
+    plt.xlabel('Learning Rate')
+    plt.ylabel('Accuracy (%)')
+    plt.xticks(rotation=45)
     
     plt.tight_layout()
     plt.show()
     
     return results
 
-
-
 if __name__ == "__main__":
-    train()
+    # Train main model
+    train(model_type="cnn", use_augmentation=True, use_dropout=True)

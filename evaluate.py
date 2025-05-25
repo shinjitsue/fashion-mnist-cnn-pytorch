@@ -1,13 +1,8 @@
 import os
 import torch
+import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
-import torch.nn as nn
-import torch.nn.functional as F
-import seaborn as sns
-import random
-
-
 from PIL import Image
 from tqdm import tqdm
 from sklearn.metrics import precision_recall_fscore_support, roc_curve, auc, confusion_matrix
@@ -16,7 +11,9 @@ from model import FashionCNN, BaselineModel, AlternativeCNN
 from utils import get_data_loaders, plot_confusion_matrix
 from config import (
     DATA_DIR, BATCH_SIZE, NUM_WORKERS, 
-    NUM_CLASSES, SAVE_DIR, MODEL_NAME, CLASS_LABELS
+    NUM_CLASSES, SAVE_DIR, CLASS_LABELS,
+    MAIN_MODEL_NAME, BASELINE_MODEL_NAME, ALTERNATIVE_MODEL_NAME,
+    NO_AUG_MODEL_NAME, NO_DROPOUT_MODEL_NAME
 )
 
 def load_model(model_file, model_class, device):
@@ -24,15 +21,17 @@ def load_model(model_file, model_class, device):
     model_path = os.path.join(SAVE_DIR, model_file)
     model = model_class(NUM_CLASSES)
     
+    if not os.path.exists(model_path):
+        print(f"Warning: {model_file} not found. Skipping...")
+        return None
+    
     try:
-        # Check if model file exists
-        if os.path.exists(model_path):
-            model.load_state_dict(torch.load(model_path, map_location=device))
-            print(f"Successfully loaded model from {model_path}")
-        else:
-            print(f"Warning: Model file {model_path} not found. Using untrained model.")
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        model.eval()
+        print(f"Successfully loaded {model_file}")
     except Exception as e:
-        print(f"Error loading model: {str(e)}. Using untrained model.")
+        print(f"Error loading {model_file}: {e}")
+        return None
     
     return model.to(device)
 
@@ -45,7 +44,7 @@ def calculate_per_class_metrics(y_true, y_pred):
     print("\nPer-Class Metrics:")
     print("Class\t\tPrecision\tRecall\t\tF1-Score\tSupport")
     for i in range(NUM_CLASSES):
-        print(f"{CLASS_LABELS[i]}\t{precision[i]:.4f}\t\t{recall[i]:.4f}\t\t{f1[i]:.4f}\t\t{support[i]}")
+        print(f"{CLASS_LABELS[i]:<12}\t{precision[i]:.4f}\t\t{recall[i]:.4f}\t\t{f1[i]:.4f}\t\t{support[i]}")
     
     return precision, recall, f1, support
 
@@ -85,7 +84,6 @@ def plot_roc_curves(y_true, y_score):
     plt.tight_layout()
     plt.show()
 
-
 def visualize_model_predictions(model, test_loader, device, num_images=10, errors_only=False):
     """
     Visualize model predictions, optionally focusing on errors only.
@@ -101,242 +99,241 @@ def visualize_model_predictions(model, test_loader, device, num_images=10, error
     
     if errors_only:
         # Collect misclassified examples
-        errors_images = []
-        errors_preds = []
-        errors_labels = []
+        images_to_show = []
+        labels_to_show = []
+        predictions_to_show = []
         
         with torch.no_grad():
             for images, labels in test_loader:
-                images = images.to(device)
-                labels = labels.to(device)
-                
+                images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
-                _, preds = torch.max(outputs, 1)
+                _, predicted = torch.max(outputs, 1)
                 
-                # Find misclassifications
-                error_mask = preds != labels
-                misclassified_images = images[error_mask]
-                misclassified_preds = preds[error_mask]
-                misclassified_labels = labels[error_mask]
+                # Find misclassified examples
+                incorrect_mask = predicted != labels
+                incorrect_images = images[incorrect_mask]
+                incorrect_labels = labels[incorrect_mask]
+                incorrect_preds = predicted[incorrect_mask]
                 
-                # Add errors to our lists
-                errors_images.extend(misclassified_images.cpu().numpy())
-                errors_preds.extend(misclassified_preds.cpu().numpy())
-                errors_labels.extend(misclassified_labels.cpu().numpy())
+                for img, true_label, pred_label in zip(incorrect_images, incorrect_labels, incorrect_preds):
+                    if len(images_to_show) >= num_images:
+                        break
+                    images_to_show.append(img.cpu())
+                    labels_to_show.append(true_label.cpu().item())
+                    predictions_to_show.append(pred_label.cpu().item())
                 
-                if len(errors_images) >= num_images:
+                if len(images_to_show) >= num_images:
                     break
         
-        # Take only the requested number of samples
-        sample_images = errors_images[:num_images]
-        predicted_labels = errors_preds[:num_images]
-        sample_labels = errors_labels[:num_images]
-        
-        title_prefix = "Challenging Cases: Misclassified Examples"
+        title_prefix = "Misclassified Examples"
     else:
-        # Get a batch of random test images
-        data_iter = iter(test_loader)
-        images, labels = next(data_iter)
+        # Show random examples
+        images_to_show = []
+        labels_to_show = []
+        predictions_to_show = []
         
-        # Select random images
-        indices = random.sample(range(len(images)), num_images)
-        sample_images_tensor = images[indices].to(device)
-        sample_labels = labels[indices].tolist()
-        
-        # Get predictions
         with torch.no_grad():
-            outputs = model(sample_images_tensor)
-            _, predicted = torch.max(outputs, 1)
+            for images, labels in test_loader:
+                images, labels = images.to(device), labels.to(device)
+                outputs = model(images)
+                _, predicted = torch.max(outputs, 1)
+                
+                for i in range(min(num_images, len(images))):
+                    images_to_show.append(images[i].cpu())
+                    labels_to_show.append(labels[i].cpu().item())
+                    predictions_to_show.append(predicted[i].cpu().item())
+                break
         
-        predicted_labels = predicted.cpu().tolist()
-        sample_images = [img.cpu().numpy() for img in sample_images_tensor]
+        title_prefix = "Sample Predictions"
+    
+    # Plot the images
+    plt.figure(figsize=(15, 6))
+    for i in range(len(images_to_show)):
+        plt.subplot(2, 5, i + 1)
+        plt.imshow(images_to_show[i].squeeze(), cmap='gray')
         
-        title_prefix = "Model Predictions"
-    
-    # Display images with true and predicted labels
-    rows = (num_images + 4) // 5  # Calculate rows needed (ceiling division)
-    cols = min(5, num_images)     # Use at most 5 columns
-    
-    fig, axes = plt.subplots(rows, cols, figsize=(3*cols, 3*rows))
-    if rows * cols == 1:  # Handle the case of a single image
-        axes = np.array([axes])
-    axes = axes.flatten()
-    
-    for i in range(min(num_images, len(sample_images))):
-        if isinstance(sample_images[i], np.ndarray):
-            img = sample_images[i][0]  # Get the grayscale channel
+        true_label = CLASS_LABELS[labels_to_show[i]]
+        pred_label = CLASS_LABELS[predictions_to_show[i]]
+        
+        if labels_to_show[i] == predictions_to_show[i]:
+            color = 'green'
+            title = f'✓ {pred_label}'
         else:
-            img = sample_images[i]
-            
-        axes[i].imshow(img, cmap='gray')
+            color = 'red'
+            title = f'✗ True: {true_label}\nPred: {pred_label}'
         
-        # Set title with true and predicted labels
-        if errors_only:
-            title = f"True: {CLASS_LABELS[sample_labels[i]]}\n"
-            title += f"Pred: {CLASS_LABELS[predicted_labels[i]]}"
-            color = 'red'  # Errors are always in red
-        else:
-            title = f"True: {CLASS_LABELS[sample_labels[i]]}\n"
-            title += f"Pred: {CLASS_LABELS[predicted_labels[i]]}"
-            color = 'green' if sample_labels[i] == predicted_labels[i] else 'red'
-        
-        axes[i].set_title(title, color=color)
-        axes[i].axis('off')
+        plt.title(title, color=color, fontsize=10)
+        plt.axis('off')
     
-    # Hide any unused subplots
-    for i in range(len(sample_images), len(axes)):
-        axes[i].axis('off')
-    
-    plt.suptitle(title_prefix)
+    plt.suptitle(f'{title_prefix}', fontsize=16)
     plt.tight_layout()
     plt.show()
 
-
 def plot_model_comparisons(model_metrics):
-    """Plot comparison of different models"""
-    models = [m[0] for m in model_metrics]
-    accuracies = [m[1]['accuracy'] for m in model_metrics]
+    """Plot comparison of different models' performance"""
+    models = list(model_metrics.keys())
+    accuracies = [model_metrics[model]['accuracy'] for model in models]
     
     plt.figure(figsize=(12, 6))
     
-    # Plot comparison of accuracies
+    # Plot accuracy comparison
     plt.subplot(1, 2, 1)
-    plt.bar(models, accuracies, color='skyblue')
+    bars = plt.bar(models, accuracies, color=['blue', 'red', 'green', 'orange', 'purple'])
     plt.title('Model Accuracy Comparison')
     plt.ylabel('Accuracy (%)')
     plt.xticks(rotation=45)
     
-    # Plot comparison of F1 scores (average across classes)
-    f1_scores = [np.mean(m[1]['f1']) for m in model_metrics]
+    # Add value labels on bars
+    for bar, acc in zip(bars, accuracies):
+        plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                f'{acc:.1f}%', ha='center', va='bottom')
     
+    # Plot F1 scores if available
     plt.subplot(1, 2, 2)
-    plt.bar(models, f1_scores, color='lightgreen')
-    plt.title('Model F1 Score Comparison')
-    plt.ylabel('Average F1 Score')
-    plt.xticks(rotation=45)
+    if 'f1_macro' in model_metrics[models[0]]:
+        f1_scores = [model_metrics[model]['f1_macro'] for model in models]
+        bars = plt.bar(models, f1_scores, color=['blue', 'red', 'green', 'orange', 'purple'])
+        plt.title('Model F1-Score Comparison')
+        plt.ylabel('F1-Score')
+        plt.xticks(rotation=45)
+        
+        # Add value labels on bars
+        for bar, f1 in zip(bars, f1_scores):
+            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                    f'{f1:.3f}', ha='center', va='bottom')
     
     plt.tight_layout()
     plt.show()
 
-
 def evaluate():
-    # Set device
+    """Evaluate all trained models"""
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"Evaluating on: {device}")
+    print(f"Evaluating models on: {device}")
     
-    # Get data loaders
-    _, test_loader = get_data_loaders(DATA_DIR, BATCH_SIZE, NUM_WORKERS)
+    # Get test data loader
+    _, test_loader = get_data_loaders(DATA_DIR, BATCH_SIZE, NUM_WORKERS, apply_augmentation=False)
     
-    # ===== Main Model Evaluation =====
-    print("\n=== Main Model Evaluation ===")
-    main_model = load_model(MODEL_NAME, FashionCNN, device)
-    main_metrics = evaluate_model(main_model, test_loader, device)
+    # Define models to evaluate
+    models_to_evaluate = [
+        (MAIN_MODEL_NAME, FashionCNN, "Main CNN (Aug + Dropout)"),
+        (BASELINE_MODEL_NAME, BaselineModel, "Baseline (Logistic Regression)"),
+        (ALTERNATIVE_MODEL_NAME, AlternativeCNN, "Alternative CNN"),
+        (NO_AUG_MODEL_NAME, FashionCNN, "CNN (No Augmentation)"),
+        (NO_DROPOUT_MODEL_NAME, FashionCNN, "CNN (No Dropout)")
+    ]
     
-    # ===== MODEL COMPARISONS =====
-    # Try to load and evaluate other models if they exist
-    try:
-        # Compare with baseline (logistic regression)
-        print("\n=== Baseline Model (Logistic Regression) ===")
-        baseline_model = load_model("baseline_fashion_mnist_cnn.pth", BaselineModel, device)
-        baseline_metrics = evaluate_model(baseline_model, test_loader, device)
-        
-        # Compare with alternative CNN
-        print("\n=== Alternative CNN Architecture ===")
-        alt_model = load_model("alternative_fashion_mnist_cnn.pth", AlternativeCNN, device)
-        alt_metrics = evaluate_model(alt_model, test_loader, device)
-        
-        # ===== ABLATION STUDIES =====
-        # Compare with no augmentation model
-        print("\n=== Ablation Study: No Data Augmentation ===")
-        no_aug_model = load_model("cnn_dropout_fashion_mnist_cnn.pth", FashionCNN, device)
-        no_aug_metrics = evaluate_model(no_aug_model, test_loader, device)
-        
-        # Compare with no dropout model
-        print("\n=== Ablation Study: No Dropout ===")
-        no_dropout_model = load_model("cnn_aug_fashion_mnist_cnn.pth", FashionCNN, device)
-        no_dropout_metrics = evaluate_model(no_dropout_model, test_loader, device)
-        
-        # Plot comparison of models
-        plot_model_comparisons([
-            ("Main CNN", main_metrics), 
-            ("Baseline", baseline_metrics),
-            ("Alternative", alt_metrics),
-            ("No Aug", no_aug_metrics),
-            ("No Dropout", no_dropout_metrics)
-        ])
-    except Exception as e:
-        print(f"Could not run full model comparison: {str(e)}")
-        print("Continuing with main model evaluation only.")
+    model_metrics = {}
     
-    # Visualize some predictions from the main model
-    visualize_model_predictions(main_model, test_loader, device, errors_only=False)
+    for model_file, model_class, model_name in models_to_evaluate:
+        print(f"\n{'='*50}")
+        print(f"Evaluating: {model_name}")
+        print(f"{'='*50}")
+        
+        model = load_model(model_file, model_class, device)
+        if model is None:
+            print(f"Skipping {model_name} due to loading error")
+            continue
+        
+        metrics = evaluate_model(model, test_loader, device, plot_visuals=True)
+        model_metrics[model_name] = metrics
+        
+        # Show sample predictions and errors
+        print("\nSample Predictions:")
+        visualize_model_predictions(model, test_loader, device, num_images=10, errors_only=False)
+        
+        print("\nMisclassified Examples:")
+        visualize_model_predictions(model, test_loader, device, num_images=10, errors_only=True)
+    
+    # Plot model comparisons
+    if model_metrics:
+        print(f"\n{'='*50}")
+        print("Model Comparison Summary")
+        print(f"{'='*50}")
+        plot_model_comparisons(model_metrics)
+        
+        # Print summary table
+        print("\nSummary Table:")
+        print("Model\t\t\t\tAccuracy\tF1-Score")
+        print("-" * 55)
+        for model_name, metrics in model_metrics.items():
+            f1_score = metrics.get('f1_macro', 0.0)
+            print(f"{model_name:<30}\t{metrics['accuracy']:.2f}%\t\t{f1_score:.4f}")
 
 def evaluate_model(model, test_loader, device, plot_visuals=True):
     """
-    Streamlined model evaluation focused on essential metrics.
+    Evaluate a single model and return comprehensive metrics.
     
     Args:
         model: Trained PyTorch model
-        test_loader: Data loader for the test dataset
-        device: Device to run the model on
-        plot_visuals: Whether to generate visualizations
+        test_loader: Data loader for test dataset
+        device: Device to run evaluation on
+        plot_visuals: Whether to plot confusion matrix and ROC curves
     
     Returns:
-        dict: Dictionary of evaluation metrics
+        dict: Dictionary containing various evaluation metrics
     """
     model.eval()
     
-    all_targets = []
     all_predictions = []
+    all_labels = []
     all_probabilities = []
     
-    with torch.no_grad():
-        for images, labels in tqdm(test_loader, desc="Evaluating model"):
-            images = images.to(device)
-            labels = labels.to(device)
-            
-            outputs = model(images)
-            probabilities = torch.softmax(outputs, dim=1)
-            _, predicted = torch.max(outputs, 1)
-            
-            all_targets.extend(labels.cpu().numpy())
-            all_predictions.extend(predicted.cpu().numpy())
-            all_probabilities.extend(probabilities.cpu().numpy())
+    correct = 0
+    total = 0
     
-    # Convert to numpy arrays
-    all_targets = np.array(all_targets)
-    all_predictions = np.array(all_predictions)
-    all_probabilities = np.array(all_probabilities)
+    print("Evaluating model...")
+    with torch.no_grad():
+        for images, labels in tqdm(test_loader, desc="Evaluating"):
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            
+            # Get probabilities
+            probabilities = torch.softmax(outputs, dim=1)
+            all_probabilities.extend(probabilities.cpu().numpy())
+            
+            # Get predictions
+            _, predicted = torch.max(outputs, 1)
+            all_predictions.extend(predicted.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+            
+            # Calculate accuracy
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
     
     # Calculate overall accuracy
-    accuracy = 100 * np.mean(all_predictions == all_targets)
-    print(f'Test Accuracy: {accuracy:.2f}%')
+    accuracy = 100 * correct / total
+    print(f"Test Accuracy: {accuracy:.2f}%")
     
     # Calculate per-class metrics
-    precision, recall, f1, support = precision_recall_fscore_support(
-        all_targets, all_predictions, average=None
-    )
+    precision, recall, f1, support = calculate_per_class_metrics(all_labels, all_predictions)
     
-    # Print per-class metrics
+    # Calculate macro averages
+    precision_macro = np.mean(precision)
+    recall_macro = np.mean(recall)
+    f1_macro = np.mean(f1)
+    
+    print(f"\nMacro Averages:")
+    print(f"Precision: {precision_macro:.4f}")
+    print(f"Recall: {recall_macro:.4f}")
+    print(f"F1-Score: {f1_macro:.4f}")
+    
     if plot_visuals:
-        print("\nPer-Class Metrics:")
-        print("Class\t\tPrecision\tRecall\t\tF1-Score\tSupport")
-        for i in range(NUM_CLASSES):
-            print(f"{CLASS_LABELS[i]}\t{precision[i]:.4f}\t\t{recall[i]:.4f}\t\t{f1[i]:.4f}\t\t{support[i]}")
-        
-        # Generate visualizations if requested
+        # Plot confusion matrix
         plot_confusion_matrix(model, test_loader, device)
-        plot_roc_curves(all_targets, all_probabilities)
-        visualize_model_predictions(model, test_loader, device, errors_only=True)
+        
+        # Plot ROC curves
+        plot_roc_curves(all_labels, np.array(all_probabilities))
     
-    # Return metrics for comparison
     return {
         'accuracy': accuracy,
-        'precision': precision,
-        'recall': recall,
-        'f1': f1,
+        'precision_macro': precision_macro,
+        'recall_macro': recall_macro,
+        'f1_macro': f1_macro,
+        'precision_per_class': precision,
+        'recall_per_class': recall,
+        'f1_per_class': f1,
+        'support_per_class': support
     }
-    
 
 if __name__ == "__main__":
     evaluate()
