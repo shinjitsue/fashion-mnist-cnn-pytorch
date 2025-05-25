@@ -10,6 +10,8 @@ This project demonstrates a complete machine learning pipeline including data pr
 
 ## 📊 Performance Results
 
+![Figure_27](https://github.com/user-attachments/assets/2d6ca2c1-b055-4f1b-9553-aec45ea965d3)
+
 ### Model Comparison Summary
 
 | Model                          | Accuracy   | F1-Score   | Key Features             |
@@ -19,8 +21,6 @@ This project demonstrates a complete machine learning pipeline including data pr
 | Main CNN (Aug + Dropout)       | 89.95%     | 0.8980     | Balanced approach        |
 | Alternative CNN                | 88.31%     | 0.8822     | Simpler architecture     |
 | Baseline (Logistic Regression) | 66.98%     | 0.6647     | Simple baseline          |
-
-![Figure_27](https://github.com/user-attachments/assets/2d6ca2c1-b055-4f1b-9553-aec45ea965d3)
 
 ### Key Scientific Findings
 
