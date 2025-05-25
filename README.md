@@ -172,7 +172,7 @@ fashion-mnist-cnn-pytorch/
 │   ├── alternative_shallow.pth
 │   ├── main_no_aug.pth
 │   └── main_no_dropout.pth
-└── data/                    # Dataset storage (auto-downloaded)
+└── data/
 ```
 
 ## 🚀 Getting Started
