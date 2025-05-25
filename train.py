@@ -5,7 +5,7 @@ import torch.optim as optim
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-from model import FashionCNN
+from model import FashionCNN, BaselineModel, AlternativeCNN
 from utils import get_data_loaders, plot_training_history
 from config import (
     DATA_DIR, BATCH_SIZE, NUM_WORKERS,
@@ -29,9 +29,9 @@ def train(model_type="cnn", use_augmentation=True, use_dropout=True):
     if model_type == "cnn":
         model = FashionCNN(NUM_CLASSES, use_dropout=use_dropout)
     elif model_type == "baseline":
-        model = BaselineModel(NUM_CLASSES)  # Simple baseline model
+        model = BaselineModel(NUM_CLASSES)
     else:
-        model = AlternativeCNN(NUM_CLASSES)  # Alternative CNN architecture
+        model = AlternativeCNN(NUM_CLASSES)
         
     model = model.to(device)
     

@@ -61,3 +61,31 @@ class FashionCNN(nn.Module):
         x = self.fc2(x)
         
         return x
+
+class BaselineModel(nn.Module):
+    """Simple baseline model (logistic regression)"""
+    def __init__(self, num_classes=10):
+        super(BaselineModel, self).__init__()
+        self.flatten = nn.Flatten()
+        self.linear = nn.Linear(28 * 28, num_classes)
+        
+    def forward(self, x):
+        x = self.flatten(x)
+        x = self.linear(x)
+        return x
+
+class AlternativeCNN(nn.Module):
+    """Alternative shallow CNN architecture for comparison"""
+    def __init__(self, num_classes=10):
+        super(AlternativeCNN, self).__init__()
+        self.conv1 = nn.Conv2d(1, 16, kernel_size=5)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.fc1 = nn.Linear(16 * 12 * 12, 128)
+        self.fc2 = nn.Linear(128, num_classes)
+        
+    def forward(self, x):
+        x = self.pool(F.relu(self.conv1(x)))
+        x = x.view(-1, 16 * 12 * 12)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
