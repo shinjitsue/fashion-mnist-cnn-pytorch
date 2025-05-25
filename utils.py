@@ -1,7 +1,3 @@
-"""
-Utility functions for the Fashion MNIST CNN project.
-"""
-
 import os
 import torch
 import matplotlib.pyplot as plt
@@ -12,7 +8,7 @@ from sklearn.metrics import confusion_matrix
 import seaborn as sns
 from config import CLASS_LABELS
 
-def get_data_loaders(data_dir, batch_size, num_workers=0):
+def get_data_loaders(data_dir, batch_size, num_workers=0, apply_augmentation=True):
     """
     Create and return data loaders for training and testing.
     
@@ -20,15 +16,32 @@ def get_data_loaders(data_dir, batch_size, num_workers=0):
         data_dir (str): Directory to store the datasets
         batch_size (int): Batch size for training and testing
         num_workers (int): Number of workers for data loading
+        apply_augmentation (bool): Whether to apply data augmentation
         
     Returns:
         tuple: (train_loader, test_loader)
     """
-    # Define the transformations to apply to the data
-    transform = transforms.Compose([
-        transforms.ToTensor(),  # Convert images to PyTorch tensors
-        transforms.Normalize((0.5,), (0.5,))  # Normalize with mean=0.5, std=0.5
+    # Define the transformations for test data
+    test_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5,), (0.5,))
     ])
+    
+    # Define transformations for training data (with augmentation)
+    if apply_augmentation:
+        train_transform = transforms.Compose([
+            # 1. Random rotation (±10 degrees)
+            transforms.RandomRotation(10),
+            # 2. Random horizontal flip
+            transforms.RandomHorizontalFlip(),
+            # 3. Random crop with padding
+            transforms.RandomCrop(28, padding=4),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
+    else:
+        # No augmentation for ablation study
+        train_transform = test_transform
     
     # Create directories if they don't exist
     os.makedirs(data_dir, exist_ok=True)
@@ -38,7 +51,7 @@ def get_data_loaders(data_dir, batch_size, num_workers=0):
         root=data_dir,
         train=True,
         download=True,
-        transform=transform
+        transform=train_transform
     )
     
     # Download and load the test data
@@ -46,7 +59,7 @@ def get_data_loaders(data_dir, batch_size, num_workers=0):
         root=data_dir,
         train=False,
         download=True,
-        transform=transform
+        transform=test_transform
     )
     
     # Create data loaders
