@@ -18,6 +18,8 @@ This project demonstrates a complete machine learning pipeline including data pr
 | Alternative CNN | 88.31% | 0.8822 | Simpler architecture |
 | Baseline (Logistic Regression) | 66.98% | 0.6647 | Simple baseline |
 
+![Figure_27](https://github.com/user-attachments/assets/2d6ca2c1-b055-4f1b-9553-aec45ea965d3)
+
 ### Key Scientific Findings
 
 1. **Data Augmentation Impact**: Surprisingly, the model without augmentation achieved the highest accuracy (92.71% vs 89.95%), suggesting that for Fashion-MNIST:
